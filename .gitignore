@@ -2,7 +2,12 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+#Other custom files
+*.png
+/env_AMS/
+/ViT-V-Net/IXI_data/
+/ViT-V-Net/pretrained_models
+/ViT-V-Net/experiments/
 # C extensions
 *.so
 
