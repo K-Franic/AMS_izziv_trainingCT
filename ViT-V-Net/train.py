@@ -86,7 +86,7 @@ class LungCTRegistrationDataset(Dataset):
         axis_to_flip = 2  # Depth (Z-axis)
         fbct = np.flip(fbct, axis=axis_to_flip).copy()
         cbct = np.flip(cbct, axis=axis_to_flip).copy()
-        print(f"FBCT shape after .copy(): {fbct.shape}")
+        #print(f"FBCT shape after .copy(): {fbct.shape}")
 
         # Convert to PyTorch tensors
         fbct = torch.tensor(fbct, dtype=torch.float32).squeeze(0)
@@ -97,8 +97,12 @@ def main():
     # Set device using the helper function
     compute_device = device()
     print(f"Using device: {compute_device}")
+    dev = device()
+    batch_size = 1
+    if dev == "gpu":
+        batch_size = 2
+    print("Device and batch_size: ", dev, batch_size)
 
-    batch_size = 2
     train_dir = r"C:\Users\frani\Desktop\AMS_izziv_trainingCT\Release_06_12_23\imagesTr"  # Ensure paths are correct
     val_dir = r"C:\Users\frani\Desktop\AMS_izziv_trainingCT\Release_06_12_23\imagesTr"
     save_dir = 'ViTVNet_reg0.02_mse_diff/'
@@ -111,8 +115,10 @@ def main():
 
     # Model configuration
     config_vit = CONFIGS_ViT_seg['ViT-V-Net']
-    reg_model = utils.register_model((160, 192, 224), 'nearest').to(compute_device)
-    model = models.ViTVNet(config_vit, img_size=(160, 192, 224)).to(compute_device)
+    """reg_model = utils.register_model((160, 192, 224), 'nearest').to(compute_device)
+    model = models.ViTVNet(config_vit, img_size=(160, 192, 224)).to(compute_device)"""  #old ViT-V-Net data sizes
+    reg_model = utils.register_model((256, 192, 192), 'nearest').to(compute_device)
+    model = models.ViTVNet(config_vit, img_size=(256, 192, 192)).to(compute_device)
 
     train_composed = transforms.Compose([
         trans.RandomFlip(0),
@@ -147,8 +153,8 @@ def main():
 
             # Data preparation
             fbct, cbct, pair_type = data
-            print("FBCT shape:", fbct.shape)
-            print("CBCT shape:", cbct.shape)
+            #print("FBCT shape:", fbct.shape)
+            #print("CBCT shape:", cbct.shape)
             fbct, cbct = fbct.to(compute_device), cbct.to(compute_device)
             
             # Forward pass
