@@ -11,6 +11,10 @@ import torch.nn as nn
 import matplotlib.pyplot as plt
 from models import CONFIGS as CONFIGS_ViT_seg
 from natsort import natsorted
+from device_helper import device
+import time
+from torch.utils.data import Dataset
+import nibabel as nib
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -32,138 +36,145 @@ class AverageMeter(object):
 def MSE_torch(x, y):
     return torch.mean((x - y) ** 2)
 
+class LungCTRegistrationDataset(Dataset):
+    def __init__(self, image_dir, transform=None):
+        """
+        Dataset for loading lung CT registration data.
+
+        Args:
+            image_dir (str): Directory containing the images.
+            transform (callable, optional): A function/transform to apply to the images.
+        """
+        self.image_dir = image_dir
+        self.transform = transform
+
+        # Group images by patient
+        self.fbct_files = sorted(glob.glob(os.path.join(image_dir, '*_0000.nii.gz')))
+        self.cbct1_files = sorted(glob.glob(os.path.join(image_dir, '*_0001.nii.gz')))
+        self.cbct2_files = sorted(glob.glob(os.path.join(image_dir, '*_0002.nii.gz')))
+
+        assert len(self.fbct_files) == len(self.cbct1_files) == len(self.cbct2_files), \
+            "Mismatch in the number of FBCT and CBCT images."
+
+    def __len__(self):
+        """
+        Returns the total number of pairs (FBCT-CBCT1, FBCT-CBCT2) in the dataset.
+        """
+        return len(self.fbct_files) * 2  # Two pairs per patient
+
+    def __getitem__(self, idx):
+        patient_idx = idx // 2
+        pair_type = idx % 2
+
+        # Load FBCT and CBCT files
+        fbct = nib.load(self.fbct_files[patient_idx]).get_fdata(dtype=np.float32)
+        cbct_path = self.cbct1_files[patient_idx] if pair_type == 0 else self.cbct2_files[patient_idx]
+        cbct = nib.load(cbct_path).get_fdata(dtype=np.float32)
+
+        # Add channel and batch axes if needed
+        if len(fbct.shape) == 3:
+            fbct = fbct[np.newaxis, np.newaxis, ...]  # Add [Batch=1, Channel=1] axes
+        if len(cbct.shape) == 3:
+            cbct = cbct[np.newaxis, np.newaxis, ...]
+
+        # Apply transformations (if any)
+        if self.transform:
+            fbct = self.transform(fbct)
+            cbct = self.transform(cbct)
+
+        # Flip along depth axis if specified in the transformation
+        axis_to_flip = 2  # Depth (Z-axis)
+        fbct = np.flip(fbct, axis=axis_to_flip).copy()
+        cbct = np.flip(cbct, axis=axis_to_flip).copy()
+        print(f"FBCT shape after .copy(): {fbct.shape}")
+
+        # Convert to PyTorch tensors
+        fbct = torch.tensor(fbct, dtype=torch.float32).squeeze(0)
+        cbct = torch.tensor(cbct, dtype=torch.float32).squeeze(0)
+
+        return fbct, cbct, pair_type
 def main():
+    # Set device using the helper function
+    compute_device = device()
+    print(f"Using device: {compute_device}")
+
     batch_size = 2
-    train_dir = 'D:/DATA/JHUBrain/Train/'
-    val_dir = 'D:/DATA/JHUBrain/Val/'
+    train_dir = r"C:\Users\frani\Desktop\AMS_izziv_trainingCT\Release_06_12_23\imagesTr"  # Ensure paths are correct
+    val_dir = r"C:\Users\frani\Desktop\AMS_izziv_trainingCT\Release_06_12_23\imagesTr"
     save_dir = 'ViTVNet_reg0.02_mse_diff/'
     lr = 0.0001
     epoch_start = 0
-    max_epoch = 500
-    cont_training = False
+    max_epoch = 1  # Set to 1 for testing purposes
+
+    # Timer for main function
+    main_start_time = time.time()
+
+    # Model configuration
     config_vit = CONFIGS_ViT_seg['ViT-V-Net']
-    reg_model = utils.register_model((160, 192, 224), 'nearest')
-    reg_model.cuda()
-    model = models.ViTVNet(config_vit, img_size=(160, 192, 224))
-    if cont_training:
-        epoch_start = 335
-        model_dir = 'experiments/'+save_dir
-        updated_lr = round(lr * np.power(1 - (epoch_start) / max_epoch,0.9),8)
-        best_model = torch.load(model_dir + natsorted(os.listdir(model_dir))[0])['state_dict']
-        model.load_state_dict(best_model)
-    else:
-        updated_lr = lr
-    model.cuda()
-    train_composed = transforms.Compose([trans.RandomFlip(0),
-                                         trans.NumpyType((np.float32, np.float32)),
-                                         ])
+    reg_model = utils.register_model((160, 192, 224), 'nearest').to(compute_device)
+    model = models.ViTVNet(config_vit, img_size=(160, 192, 224)).to(compute_device)
 
-    val_composed = transforms.Compose([trans.Seg_norm(), #rearrange segmentation label to 1 to 46
-                                       trans.NumpyType((np.float32, np.int16)),
-                                        ])
+    train_composed = transforms.Compose([
+        trans.RandomFlip(0),
+        trans.NumpyType((np.float32, np.float32)),
+    ])
 
-    train_set = datasets.JHUBrainDataset(glob.glob(train_dir + '*.pkl'), transforms=train_composed)
-    val_set = datasets.JHUBrainInferDataset(glob.glob(val_dir + '*.pkl'), transforms=val_composed)
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_set, batch_size=1, shuffle=False, num_workers=4, pin_memory=True, drop_last=True)
+    val_composed = transforms.Compose([
+        trans.Seg_norm(),
+        trans.NumpyType((np.float32, np.int16)),
+    ])
 
-    optimizer = optim.Adam(model.parameters(), lr=updated_lr, weight_decay=0, amsgrad=True)
-    criterion = nn.MSELoss()
-    criterions = [criterion]
-    weights = [1]
-    # prepare deformation loss
-    criterions += [losses.Grad3d(penalty='l2')]
-    weights += [0.02]
-    best_mse = 0
-    writer = SummaryWriter(log_dir='ViTVNet_log')
+    # Dataset and DataLoader setup
+    train_set = LungCTRegistrationDataset(train_dir, transform=train_composed)
+    val_set = LungCTRegistrationDataset(val_dir, transform=val_composed)
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True)
+    val_loader = DataLoader(val_set, batch_size=1, shuffle=False, num_workers=0, pin_memory=True, drop_last=True)
+
+    # Optimizer and loss configuration
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=0, amsgrad=True)
+    criterions = [nn.MSELoss(), losses.Grad3d(penalty='l2')]
+    weights = [1, 0.02]
+
+    # Training loop (simplified for one epoch and CPU)
+    print(f"Training for {max_epoch} epoch(s)")
     for epoch in range(epoch_start, max_epoch):
-        print('Training Starts')
-        '''
-        Training
-        '''
+        print(f"Epoch {epoch + 1}/{max_epoch} starting...")
         loss_all = AverageMeter()
-        idx = 0
-        for data in train_loader:
-            idx += 1
+
+        for idx, data in enumerate(train_loader):
             model.train()
-            adjust_learning_rate(optimizer, epoch, max_epoch, lr)
-            data = [t.cuda() for t in data]
-            x = data[0]
-            y = data[1]
-            x_in = torch.cat((x,y), dim=1)
-            output = model(x_in)
-            loss = 0
-            loss_vals = []
-            for n, loss_function in enumerate(criterions):
-                curr_loss = loss_function(output[n], y) * weights[n]
-                loss_vals.append(curr_loss)
-                loss += curr_loss
-            loss_all.update(loss.item(), y.numel())
-            # compute gradient and do SGD step
             optimizer.zero_grad()
+
+            # Data preparation
+            fbct, cbct, pair_type = data
+            print("FBCT shape:", fbct.shape)
+            print("CBCT shape:", cbct.shape)
+            fbct, cbct = fbct.to(compute_device), cbct.to(compute_device)
+            
+            # Forward pass
+            x_in = torch.cat((fbct, cbct), dim=1)
+            output = model(x_in)
+
+            # Loss computation
+            loss = sum(
+                criterions[i](output[i], cbct) * weights[i]
+                for i in range(len(criterions))
+            )
+            loss_all.update(loss.item(), cbct.numel())
+
+            # Backpropagation
             loss.backward()
             optimizer.step()
 
-            del x_in
-            del output
-            # flip fixed and moving images
-            loss = 0
-            x_in = torch.cat((y, x), dim=1)
-            output = model(x_in)
-            for n, loss_function in enumerate(criterions):
-                curr_loss = loss_function(output[n], x) * weights[n]
-                loss_vals[n] += curr_loss
-                loss += curr_loss
-            loss_all.update(loss.item(), y.numel())
-            # compute gradient and do SGD step
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            print(f"Iteration {idx + 1}/{len(train_loader)}, Loss: {loss.item():.4f}")
 
-            print('Iter {} of {} loss {:.4f}, Img Sim: {:.6f}, Reg: {:.6f}'.format(idx, len(train_loader), loss.item(), loss_vals[0].item()/2, loss_vals[1].item()/2))
+    print(f"Epoch {epoch + 1} completed. Average Loss: {loss_all.avg:.4f}")
 
-        writer.add_scalar('Loss/train', loss_all.avg, epoch)
-        print('Epoch {} loss {:.4f}'.format(epoch, loss_all.avg))
-        '''
-        Validation
-        '''
-        eval_dsc = AverageMeter()
-        with torch.no_grad():
-            for data in val_loader:
-                model.eval()
-                data = [t.cuda() for t in data]
-                x = data[0]
-                y = data[1]
-                x_seg = data[2]
-                y_seg = data[3]
-                # x = x.squeeze(0).permute(1, 0, 2, 3)
-                # y = y.squeeze(0).permute(1, 0, 2, 3)
-                x_in = torch.cat((x, y), dim=1)
-                output = model(x_in)
-                def_out = reg_model([x_seg.cuda().float(), output[1].cuda()])
-                dsc = utils.dice_val(def_out.long(), y_seg.long(), 46)
-                eval_dsc.update(dsc.item(), x.size(0))
-                print(eval_dsc.avg)
-        best_mse = max(eval_dsc.avg, best_mse)
-        save_checkpoint({
-            'epoch': epoch + 1,
-            'state_dict': model.state_dict(),
-            'best_mse': best_mse,
-            'optimizer': optimizer.state_dict(),
-        }, save_dir='experiments/'+save_dir, filename='dsc{:.3f}.pth.tar'.format(eval_dsc.avg))
-        writer.add_scalar('MSE/validate', eval_dsc.avg, epoch)
-        plt.switch_backend('agg')
-        pred_fig = comput_fig(def_out)
-        x_fig = comput_fig(x_seg)
-        tar_fig = comput_fig(y_seg)
-        writer.add_figure('input', x_fig, epoch)
-        plt.close(x_fig)
-        writer.add_figure('ground truth', tar_fig, epoch)
-        plt.close(tar_fig)
-        writer.add_figure('prediction', pred_fig, epoch)
-        plt.close(pred_fig)
-        loss_all.reset()
-    writer.close()
+    # End timer for main
+    main_end_time = time.time()
+    elapsed_main_time = main_end_time - main_start_time
+    print(f"Main function runtime: {elapsed_main_time:.2f} seconds")
+
 
 def comput_fig(img):
     img = img.detach().cpu().numpy()[0, 0, 48:64, :, :]
@@ -191,14 +202,5 @@ if __name__ == '__main__':
     '''
     GPU configuration
     '''
-    GPU_iden = 0
-    GPU_num = torch.cuda.device_count()
-    print('Number of GPU: ' + str(GPU_num))
-    for GPU_idx in range(GPU_num):
-        GPU_name = torch.cuda.get_device_name(GPU_idx)
-        print('     GPU #' + str(GPU_idx) + ': ' + GPU_name)
-    torch.cuda.set_device(GPU_iden)
-    GPU_avai = torch.cuda.is_available()
-    print('Currently using: ' + torch.cuda.get_device_name(GPU_iden))
-    print('If the GPU is available? ' + str(GPU_avai))
+    
     main()

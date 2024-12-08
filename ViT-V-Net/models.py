@@ -65,6 +65,16 @@ class Attention(nn.Module):
         return x.permute(0, 2, 1, 3)
 
     def forward(self, hidden_states):
+        # Ensure hidden_states match the size of positional embeddings (if applicable)
+        if hasattr(self, 'position_embeddings') and hidden_states.size(1) != self.position_embeddings.size(1):
+            if hidden_states.size(1) > self.position_embeddings.size(1):
+                hidden_states = hidden_states[:, :self.position_embeddings.size(1), :]
+            else:
+                extra_pos = self.position_embeddings.size(1) - hidden_states.size(1)
+                pad_tensor = torch.zeros(hidden_states.size(0), extra_pos, hidden_states.size(2), device=hidden_states.device)
+                hidden_states = torch.cat((hidden_states, pad_tensor), dim=1)
+        
+        # Continue with the original attention mechanism logic
         mixed_query_layer = self.query(hidden_states)
         mixed_key_layer = self.key(hidden_states)
         mixed_value_layer = self.value(hidden_states)
@@ -85,8 +95,8 @@ class Attention(nn.Module):
         context_layer = context_layer.view(*new_context_layer_shape)
         attention_output = self.out(context_layer)
         attention_output = self.proj_dropout(attention_output)
-        return attention_output, weights
 
+        return attention_output, weights
 
 class Mlp(nn.Module):
     def __init__(self, config):

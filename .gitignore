@@ -8,6 +8,8 @@ __pycache__/
 /ViT-V-Net/IXI_data/
 /ViT-V-Net/pretrained_models
 /ViT-V-Net/experiments/
+/Release_06_12_23/
+
 # C extensions
 *.so
 
