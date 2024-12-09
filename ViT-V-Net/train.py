@@ -108,7 +108,7 @@ def main():
     save_dir = 'ViTVNet_reg0.02_mse_diff/'
     lr = 0.0001
     epoch_start = 0
-    max_epoch = 1  # Set to 1 for testing purposes
+    max_epoch = 10  # Set to 1 for testing purposes
 
     # Timer for main function
     main_start_time = time.time()
@@ -208,5 +208,4 @@ if __name__ == '__main__':
     '''
     GPU configuration
     '''
-    
     main()
