@@ -1,4 +1,4 @@
-# Uporabimo uradno PyTorch sliko z vgrajeno podporo za CUDA in Python 3.9
+# Uporabimo uradno PyTorch sliko z vgrajeno podporo za CUDA in Python 3.8
 FROM pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime
 
 # Nastavimo delovno mapo
