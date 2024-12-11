@@ -103,12 +103,12 @@ def main():
         batch_size = 2
     print("Device and batch_size: ", dev, batch_size)
 
-    train_dir = r"C:\Users\frani\Desktop\AMS_izziv_trainingCT\Release_06_12_23\imagesTr"  # Ensure paths are correct
-    val_dir = r"C:\Users\frani\Desktop\AMS_izziv_trainingCT\Release_06_12_23\imagesTr"
+    train_dir = "/app/Release_06_12_23/imagesTr"  # Ensure paths are correct
+    val_dir = "/app/Release_06_12_23/imagesTr"
     save_dir = 'ViTVNet_reg0.02_mse_diff/'
     lr = 0.0001
     epoch_start = 0
-    max_epoch = 10  # Set to 1 for testing purposes
+    max_epoch = 100  # Set to 1 for testing purposes
 
     # Timer for main function
     main_start_time = time.time()
@@ -134,7 +134,7 @@ def main():
     train_set = LungCTRegistrationDataset(train_dir, transform=train_composed)
     val_set = LungCTRegistrationDataset(val_dir, transform=val_composed)
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True)
-    val_loader = DataLoader(val_set, batch_size=1, shuffle=False, num_workers=0, pin_memory=True, drop_last=True)
+    val_loader = DataLoader(val_set, batch_size=2, shuffle=False, num_workers=0, pin_memory=True, drop_last=True)
 
     # Optimizer and loss configuration
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=0, amsgrad=True)

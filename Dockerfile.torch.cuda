@@ -8,15 +8,20 @@ WORKDIR /app
 COPY requirements.txt .
 
 RUN sed -i '/pywin32/d' requirements.txt
-RUN pip install torch==2.0.1+cu117 --index-url https://download.pytorch.org/whl/cu117
-RUN pip install torchvision==0.15.2+cu117 --index-url https://download.pytorch.org/whl/cu117
-RUN pip install torchaudio==2.0.2+cu117 --index-url https://download.pytorch.org/whl/cu117
+#RUN pip install torch==2.0.1+cu117 --index-url https://download.pytorch.org/whl/cu117
+#RUN pip install torchvision==0.15.2+cu117 --index-url https://download.pytorch.org/whl/cu117
+#RUN pip install torchaudio==2.0.2+cu117 --index-url https://download.pytorch.org/whl/cu117
 # Namestimo pakete
 RUN pip install --no-cache-dir -r requirements.txt
 # Kopiramo vsebino iz gostitelja v vsebino mape (nahajamo se v 'WORKDIR')
-COPY . .
+#COPY . .
+
 
 # Določimo ukaz, ki bo zagnal aplikacijo
-CMD ["python", "ViT-V-Net/train.py"]
-
-#docker run -v /ViT-V-Net:/app kf1-torch-cuda-image python ViT-V-Net/train.py
+#CMD ["python", "ViT-V-Net/train.py"]
+#-v ./ViT-V-Net:/app
+#docker run --runtime=nvidia -v ./ViT-V-Net:/app/ViT-V-Net -v ./Release_06_12_23:/app/Release_06_12_23 kf1-torch-cuda-image python ViT-V-Net/train.py
+#docker run --runtime=nvidia -v ./ViT-V-Net:/app/ViT-V-Net -v ./Release_06_12_23:/app/Release_06_12_23 kf1-torch-cuda-image bash #za klicanje pos. skript
+#vmes ko laufa koda CTRL+P CTRL+Q za detachanje
+#za nazaj attach: docker ps
+#docker attach "container_name" 
