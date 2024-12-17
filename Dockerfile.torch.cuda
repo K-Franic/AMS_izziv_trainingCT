@@ -25,3 +25,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 #vmes ko laufa koda CTRL+P CTRL+Q za detachanje
 #za nazaj attach: docker ps
 #docker attach "container_name" 
+# -v ./Models:/app/Models

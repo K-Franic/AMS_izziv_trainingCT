@@ -37,24 +37,36 @@ def MSE_torch(x, y):
     return torch.mean((x - y) ** 2)
 
 class LungCTRegistrationDataset(Dataset):
-    def __init__(self, image_dir, transform=None):
+    def __init__(self, image_dir, transform=None, split="train"):
         """
         Dataset for loading lung CT registration data.
 
         Args:
             image_dir (str): Directory containing the images.
             transform (callable, optional): A function/transform to apply to the images.
+            split (str): 'train' or 'val' to specify dataset split.
         """
         self.image_dir = image_dir
         self.transform = transform
 
-        # Group images by patient
-        self.fbct_files = sorted(glob.glob(os.path.join(image_dir, '*_0000.nii.gz')))
-        self.cbct1_files = sorted(glob.glob(os.path.join(image_dir, '*_0001.nii.gz')))
-        self.cbct2_files = sorted(glob.glob(os.path.join(image_dir, '*_0002.nii.gz')))
+        # Load all files and filter by split
+        all_fbct_files = sorted(glob.glob(os.path.join(image_dir, '*_0000.nii.gz')))
+        all_cbct1_files = sorted(glob.glob(os.path.join(image_dir, '*_0001.nii.gz')))
+        all_cbct2_files = sorted(glob.glob(os.path.join(image_dir, '*_0002.nii.gz')))
+
+        if split == "train":
+            # First eleven patients
+            self.fbct_files = [f for f in all_fbct_files if int(os.path.basename(f).split('_')[0]) <= 10]
+            self.cbct1_files = [f for f in all_cbct1_files if int(os.path.basename(f).split('_')[0]) <= 10]
+            self.cbct2_files = [f for f in all_cbct2_files if int(os.path.basename(f).split('_')[0]) <= 10]
+        elif split == "val":
+            # Last three patients
+            self.fbct_files = [f for f in all_fbct_files if int(os.path.basename(f).split('_')[0]) >= 11]
+            self.cbct1_files = [f for f in all_cbct1_files if int(os.path.basename(f).split('_')[0]) >= 11]
+            self.cbct2_files = [f for f in all_cbct2_files if int(os.path.basename(f).split('_')[0]) >= 11]
 
         assert len(self.fbct_files) == len(self.cbct1_files) == len(self.cbct2_files), \
-            "Mismatch in the number of FBCT and CBCT images."
+            "Mismatch in the number of FBCT and CBCT images for the chosen split."
 
     def __len__(self):
         """
@@ -104,11 +116,11 @@ def main():
     print("Device and batch_size: ", dev, batch_size)
 
     train_dir = "/app/Release_06_12_23/imagesTr"  # Ensure paths are correct
-    val_dir = "/app/Release_06_12_23/imagesTr"
-    save_dir = 'ViTVNet_reg0.02_mse_diff/'
+    val_dir = "/app/Release_06_12_23/imagesTr_Val"
+    save_dir = '/app/Models/Vitvnet_1'
     lr = 0.0001
     epoch_start = 0
-    max_epoch = 100  # Set to 1 for testing purposes
+    max_epoch = 100  ##
 
     # Timer for main function
     main_start_time = time.time()
@@ -131,17 +143,17 @@ def main():
     ])
 
     # Dataset and DataLoader setup
-    train_set = LungCTRegistrationDataset(train_dir, transform=train_composed)
-    val_set = LungCTRegistrationDataset(val_dir, transform=val_composed)
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True)
-    val_loader = DataLoader(val_set, batch_size=2, shuffle=False, num_workers=0, pin_memory=True, drop_last=True)
+    train_set = LungCTRegistrationDataset(train_dir, transform=train_composed, split="train")
+    val_set = LungCTRegistrationDataset(val_dir, transform=val_composed, split="val")
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    val_loader = DataLoader(val_set, batch_size=2, shuffle=False, num_workers=4, pin_memory=True, drop_last=True)
 
     # Optimizer and loss configuration
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=0, amsgrad=True)
     criterions = [nn.MSELoss(), losses.Grad3d(penalty='l2')]
     weights = [1, 0.02]
 
-    # Training loop (simplified for one epoch and CPU)
+    
     print(f"Training for {max_epoch} epoch(s)")
     for epoch in range(epoch_start, max_epoch):
         print(f"Epoch {epoch + 1}/{max_epoch} starting...")

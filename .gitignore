@@ -9,7 +9,8 @@ __pycache__/
 /ViT-V-Net/pretrained_models
 /ViT-V-Net/experiments/
 /Release_06_12_23/
-
+/Models
+/ViT-V-Net/Models
 # C extensions
 *.so
 
