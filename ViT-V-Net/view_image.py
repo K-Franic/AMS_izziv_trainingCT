@@ -43,15 +43,15 @@ def display_slices(volume, title_prefix):
 
 if __name__ == "__main__":
     # Dummy 3D volumes (replace with actual CT volumes)
-    FBCT = nib.load(r"C:\Users\frani\Desktop\AMS_izziv_trainingCT\Release_06_12_23\masksTr\ThoraxCBCT_0010_0000.nii.gz") 
-    CBCT1 = nib.load(r"C:\Users\frani\Desktop\AMS_izziv_trainingCT\Release_06_12_23\masksTr\ThoraxCBCT_0010_0000.nii.gz")  
-    CBCT2 = nib.load(r"C:\Users\frani\Desktop\AMS_izziv_trainingCT\Release_06_12_23\masksTr\ThoraxCBCT_0010_0000.nii.gz") 
+    FBCT = nib.load("Release_06_12_23/masksTr/ThoraxCBCT_0010_0000.nii.gz") 
+    CBCT1 = nib.load("Release_06_12_23/masksTr/ThoraxCBCT_0010_0000.nii.gz")  
+    CBCT2 = nib.load("Release_06_12_23/masksTr/ThoraxCBCT_0010_0000.nii.gz") 
     print(CBCT1.shape)
     FBCT = np.asarray(FBCT.get_fdata())
     CBCT1 = np.asarray(CBCT1.get_fdata())
     CBCT2 = np.asarray(CBCT2.get_fdata())
     print(CBCT1.shape)
     # Display slices for each volume
-    display_slices(FBCT, "FBCT")
-    display_slices(CBCT1, "CBCT1")
-    display_slices(CBCT2, "CBCT2")
+    print(FBCT[0,0,0])
+    print(CBCT1[150,100,100])
+    print(CBCT2[210,150,150])

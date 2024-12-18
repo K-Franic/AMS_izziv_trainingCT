@@ -114,18 +114,18 @@ class register_model(nn.Module):
         out = self.spatial_trans(img, flow)
         return out
 
-def dice_val(y_pred, y_true, num_clus):
-    y_pred = nn.functional.one_hot(y_pred, num_classes=num_clus)
-    y_pred = torch.squeeze(y_pred, 1)
-    y_pred = y_pred.permute(0, 4, 1, 2, 3).contiguous()
-    y_true = nn.functional.one_hot(y_true, num_classes=num_clus)
-    y_true = torch.squeeze(y_true, 1)
-    y_true = y_true.permute(0, 4, 1, 2, 3).contiguous()
-    intersection = y_pred * y_true
-    intersection = intersection.sum(dim=[2, 3, 4])
-    union = y_pred.sum(dim=[2, 3, 4]) + y_true.sum(dim=[2, 3, 4])
-    dsc = (2.*intersection) / (union + 1e-5)
-    return torch.mean(torch.mean(dsc, dim=1))
+def dice_val(y_pred, y_true):
+    # Apply a threshold to convert to binary (0 or 1) for both y_pred and y_true
+    y_pred = (y_pred > 0.5).float()  # Assuming sigmoid output for binary classification
+    y_true = (y_true > 0.5).float()  # Ensure y_true is also binary
+
+    # Compute intersection and union for the binary class
+    intersection = torch.sum(y_pred * y_true)
+    union = torch.sum(y_pred) + torch.sum(y_true)
+
+    # Compute dice score
+    dice_score = (2.0 * intersection) / (union + 1e-5)
+    return dice_score
 
 def jacobian_determinant(disp):
     """

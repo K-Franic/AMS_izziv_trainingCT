@@ -39,82 +39,90 @@ def MSE_torch(x, y):
     return torch.mean((x - y) ** 2)
 
 class LungCTRegistrationDataset(Dataset):
-    def __init__(self, image_dir, transform=None, split="train"):
-        """
-        Dataset for loading lung CT registration data.
-
-        Args:
-            image_dir (str): Directory containing the images.
-            transform (callable, optional): A function/transform to apply to the images.
-            split (str): "train" or "val", determines which subset of patients to include.
-        """
+    def __init__(self, image_dir, mask_dir, transform=None, split="train"):
         self.image_dir = image_dir
+        self.mask_dir = mask_dir
         self.transform = transform
 
-        # List all files
-        self.fbct_files = sorted(glob.glob(os.path.join(image_dir, '*_0000.nii.gz')))
-        self.cbct1_files = sorted(glob.glob(os.path.join(image_dir, '*_0001.nii.gz')))
-        self.cbct2_files = sorted(glob.glob(os.path.join(image_dir, '*_0002.nii.gz')))
+        # Load all image files
+        all_fbct_files = sorted(glob.glob(os.path.join(image_dir, '*_0000.nii.gz')))
+        all_cbct1_files = sorted(glob.glob(os.path.join(image_dir, '*_0001.nii.gz')))
+        all_cbct2_files = sorted(glob.glob(os.path.join(image_dir, '*_0002.nii.gz')))
 
-        """# Extract patient IDs
-        def get_patient_id(filepath):
-            filename = os.path.basename(filepath)
-            return int(filename.split('_')[1])
-        
-        # Filter by split
+        def extract_patient_number(filename):
+            """Extracts the zero-padded patient number from the filename."""
+            basename = os.path.basename(filename)
+            patient_number_str = basename.split('_')[1]  # Extract patient number
+            return int(patient_number_str)  # Convert to integer for comparison
+
+        def format_patient_number(number):
+            """Formats the patient number with zero-padding."""
+            return f"{number:04}"  # Zero-pad to 4 digits
+
+        # Split images by training/validation sets
         if split == "train":
-            self.fbct_files = [f for f in all_fbct_files if get_patient_id(f) <= 10]
-            self.cbct1_files = [f for f in all_cbct1_files if get_patient_id(f) <= 10]
-            self.cbct2_files = [f for f in all_cbct2_files if get_patient_id(f) <= 10]
+            self.fbct_files = [f for f in all_fbct_files if extract_patient_number(f) <= 10]
+            self.cbct1_files = [f for f in all_cbct1_files if extract_patient_number(f) <= 10]
+            self.cbct2_files = [f for f in all_cbct2_files if extract_patient_number(f) <= 10]
         elif split == "val":
-            self.fbct_files = [f for f in all_fbct_files if 11 <= get_patient_id(f) <= 13]
-            self.cbct1_files = [f for f in all_cbct1_files if 11 <= get_patient_id(f) <= 13]
-            self.cbct2_files = [f for f in all_cbct2_files if 11 <= get_patient_id(f) <= 13]
-        else:
-            raise ValueError("Split must be 'train' or 'val'.")"""
+            self.fbct_files = [f for f in all_fbct_files if extract_patient_number(f) >= 11]
+            self.cbct1_files = [f for f in all_cbct1_files if extract_patient_number(f) >= 11]
+            self.cbct2_files = [f for f in all_cbct2_files if extract_patient_number(f) >= 11]
 
-        # Check file counts
+        # Ensure the number of images is consistent across types
         assert len(self.fbct_files) == len(self.cbct1_files) == len(self.cbct2_files), \
-            "Mismatch in the number of FBCT and CBCT images."
+            "Mismatch in the number of FBCT, CBCT1, and CBCT2 images for the chosen split."
+
+        # Match masks to images, zero-padding patient numbers
+        self.fbct_masks = [os.path.join(mask_dir, f"ThoraxCBCT_{format_patient_number(extract_patient_number(f))}_0000.nii.gz") for f in self.fbct_files]
+        self.cbct1_masks = [os.path.join(mask_dir, f"ThoraxCBCT_{format_patient_number(extract_patient_number(f))}_0001.nii.gz") for f in self.cbct1_files]
+        self.cbct2_masks = [os.path.join(mask_dir, f"ThoraxCBCT_{format_patient_number(extract_patient_number(f))}_0002.nii.gz") for f in self.cbct2_files]
+
+        # Assert that the number of masks matches the number of images
+        all_masks = self.fbct_masks + self.cbct1_masks + self.cbct2_masks
+        assert len(all_masks) == len(self.fbct_files) + len(self.cbct1_files) + len(self.cbct2_files), \
+            "Mismatch between the total number of images and masks."
 
     def __len__(self):
-        """Returns the total number of pairs (FBCT-CBCT1, FBCT-CBCT2) in the dataset."""
-        return len(self.fbct_files) * 2  # Two pairs per patient
+        return len(self.fbct_files) + len(self.cbct1_files) + len(self.cbct2_files)
 
     def __getitem__(self, idx):
-        patient_idx = idx // 2
-        pair_type = idx % 2
+        if idx < len(self.fbct_files):
+            image_path = self.fbct_files[idx]
+            mask_path = self.fbct_masks[idx]
+        elif idx < len(self.fbct_files) + len(self.cbct1_files):
+            image_path = self.cbct1_files[idx - len(self.fbct_files)]
+            mask_path = self.cbct1_masks[idx - len(self.fbct_files)]
+        else:
+            image_path = self.cbct2_files[idx - len(self.fbct_files) - len(self.cbct1_files)]
+            mask_path = self.cbct2_masks[idx - len(self.fbct_files) - len(self.cbct1_files)]
 
-        # Load FBCT and CBCT files
-        fbct = nib.load(self.fbct_files[patient_idx]).get_fdata(dtype=np.float32)
-        cbct_path = self.cbct1_files[patient_idx] if pair_type == 0 else self.cbct2_files[patient_idx]
-        cbct = nib.load(cbct_path).get_fdata(dtype=np.float32)
+        image = nib.load(image_path).get_fdata(dtype=np.float32)
+        mask = nib.load(mask_path).get_fdata(dtype=np.float32)
+        #mask = mask.astype(np.int16)
 
-        # Add channel and batch axes if needed
-        if len(fbct.shape) == 3:
-            fbct = fbct[np.newaxis, np.newaxis, ...]  # Add [Batch=1, Channel=1] axes
-        if len(cbct.shape) == 3:
-            cbct = cbct[np.newaxis, np.newaxis, ...]
+        if len(image.shape) == 3:
+            image = image[np.newaxis, np.newaxis, ...]
+        if len(mask.shape) == 3:
+            mask = mask[np.newaxis, np.newaxis, ...]
 
-        # Apply transformations (if any)
         if self.transform:
-            fbct = self.transform(fbct)
-            cbct = self.transform(cbct)
+            image = self.transform(image)
+            mask = self.transform(mask)
 
-        # Convert to PyTorch tensors
-        fbct = torch.tensor(fbct, dtype=torch.float32).squeeze(0)
-        cbct = torch.tensor(cbct, dtype=torch.float32).squeeze(0)
+        image = torch.tensor(image, dtype=torch.float32).squeeze(0)
+        mask = torch.tensor(mask, dtype=torch.float32).squeeze(0)
 
-        return fbct, cbct, pair_type
-
+        return image, mask
+                      
 def main():
     # Initialize WandB
     wandb.init(
         project="KF-ct-registration_test",  # Your project name on WandB
         config={
             "learning_rate": 0.0001,
-            "epochs": 1,
-            "batch_size": 2,
+            "epochs": 200,
+            "batch_size": 1,
             "optimizer": "Adam",
             "model": "ViT-V-Net"
         }
@@ -127,12 +135,13 @@ def main():
     dev = device()
     batch_size = 1
     if dev == "cuda":
-        batch_size = 2
+        batch_size = 1
     print("Device and batch_size: ", dev, batch_size)
 
     train_dir = "/app/Release_06_12_23/imagesTr"
-    val_dir = "/app/Release_06_12_23/imagesTr_val"
-    save_dir = '/app/ViT-V-Net/Models/Vitvnet1'
+    val_dir = "/app/Release_06_12_23/imagesTr"  # Same directory for validation
+    mask_dir = "/app/Release_06_12_23/masksTr"  # Mask directory
+    save_dir = '/app/ViT-V-Net/Models/Vitvnet200'
     lr = config.learning_rate
     epoch_start = 0
     max_epoch = config.epochs
@@ -154,8 +163,8 @@ def main():
     ])
 
     # Datasets and DataLoaders
-    train_set = LungCTRegistrationDataset(train_dir, transform=train_composed, split="train")
-    val_set = LungCTRegistrationDataset(val_dir, transform=val_composed, split="val")
+    train_set = LungCTRegistrationDataset(train_dir, mask_dir, transform=train_composed, split="train")
+    val_set = LungCTRegistrationDataset(val_dir, mask_dir, transform=val_composed, split="val")
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True)
     val_loader = DataLoader(val_set, batch_size=1, shuffle=False, num_workers=0, pin_memory=True, drop_last=True)
 
@@ -196,6 +205,7 @@ def main():
 
         print(f"Training Loss: {loss_all.avg:.4f}")
 
+        #torch.cuda.empty_cache()  # Free up unused GPU memory
         # Validation
         eval_metric = validate(model, reg_model, val_loader, device="cuda")
         best_metric = max(eval_metric, best_metric)
@@ -215,7 +225,6 @@ def main():
 
     # Finish WandB run
     wandb.finish()
-
 
 # Validation Function
 """def validate(model, reg_model, val_loader, device):
@@ -246,21 +255,25 @@ def validate(model, reg_model, val_loader, device):
     with torch.no_grad():
         for data in val_loader:
             data = [t.to(device) for t in data]
-            x, y, x_seg, y_seg = data
+            x, y = data[0], data[1]  # Image and corresponding mask
+
+            # Forward Pass
             x_in = torch.cat((x, y), dim=1)
             output = model(x_in)
-            def_out = reg_model([x_seg.float(), output[1]])
+
+            # Compute Dice, MSE, MAE using segmentation masks
+            def_out = reg_model([x, output[1]])
 
             # Compute Dice
-            dice = utils.dice_val(def_out.long(), y_seg.long(), num_classes=46)
+            dice = utils.dice_val(def_out.long(), y.long())
             dice_meter.update(dice.item(), x.size(0))
 
             # Compute MSE
-            mse = MSE_torch(def_out, y_seg)
+            mse = MSE_torch(def_out, y)
             mse_meter.update(mse.item(), x.size(0))
 
             # Compute MAE (if applicable)
-            mae = mean_absolute_error(def_out.cpu().numpy().flatten(), y_seg.cpu().numpy().flatten())
+            mae = mean_absolute_error(def_out.cpu().numpy().flatten(), y.cpu().numpy().flatten())
             mae_meter.update(mae, x.size(0))
 
     print(f"Validation Results - Dice: {dice_meter.avg:.4f}, MSE: {mse_meter.avg:.4f}, MAE: {mae_meter.avg:.4f}")
@@ -306,4 +319,5 @@ if __name__ == '__main__':
     '''
     GPU configuration
     '''
+    torch.cuda.empty_cache()
     main()

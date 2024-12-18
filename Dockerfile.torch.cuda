@@ -22,6 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 #-v ./ViT-V-Net:/app
 #docker run --runtime=nvidia -v ./ViT-V-Net:/app/ViT-V-Net -v ./Release_06_12_23:/app/Release_06_12_23 kf1-torch-cuda-image python ViT-V-Net/train.py
 #docker run --runtime=nvidia -v ./ViT-V-Net:/app/ViT-V-Net -v ./Release_06_12_23:/app/Release_06_12_23 kf1-torch-cuda-image bash #za klicanje pos. skript
+# CUDA_VISIBLE_DEVICES=1 python ViT-V-Net/train_2.py  #zagon v bashu (drugi gpu)
 #vmes ko laufa koda CTRL+P CTRL+Q za detachanje
 #za nazaj attach: docker ps
 #docker attach "container_name" 
