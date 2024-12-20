@@ -483,6 +483,8 @@ class NumpyType(Base):
             return img
         # make this work with both Tensor and Numpy
         return img.astype(self.types[k])
+        
+        #return img.type(self.types[k])
 
     def __str__(self):
         s = ', '.join([str(s) for s in self.types])

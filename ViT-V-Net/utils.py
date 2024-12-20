@@ -129,34 +129,37 @@ def dice_val(y_pred, y_true):
 
 def jacobian_determinant(disp):
     """
-    jacobian determinant of a displacement field.
-    NB: to compute the spatial gradients, we use np.gradient.
+    Computes the Jacobian determinant of a 3D displacement field using PyTorch.
     Parameters:
-        disp: 3D displacement field of size [nb_dims, *vol_shape]
+        disp: Tensor of shape [1, 3, D, H, W] (batch size, nb_dims, vol_shape).
     Returns:
-        jacobian determinant (matrix)
+        jac_det: Tensor of shape [D, H, W] containing the Jacobian determinants.
     """
+    # Ensure disp is a PyTorch tensor and has the expected shape
+    if not isinstance(disp, torch.Tensor):
+        raise ValueError("Input displacement field must be a PyTorch tensor.")
 
-    # check inputs
-    volshape = disp.shape[1:]
-    nb_dims = len(volshape)
-    assert len(volshape) in (2, 3), 'flow has to be 2D or 3D'
+    assert disp.dim() == 5 and disp.size(1) == 3, \
+        "Displacement field must have shape [1, 3, D, H, W]."
 
-    # compute grid
-    grid_lst = nd.volsize2ndgrid(volshape)
-    grid = np.stack(grid_lst, 0)
+    # Remove batch dimension
+    disp = disp[0]  # Shape: [3, D, H, W]
 
-    # compute gradients
-    [xFX, xFY, xFZ] = np.gradient(grid[0] - disp[0])
-    [yFX, yFY, yFZ] = np.gradient(grid[1] - disp[1])
-    [zFX, zFY, zFZ] = np.gradient(grid[2] - disp[2])
+    # Compute spatial gradients for each displacement component
+    J11, J12, J13 = torch.gradient(disp[0], dim=(0, 1, 2))  # x-grad of disp_x, disp_y, disp_z
+    J21, J22, J23 = torch.gradient(disp[1], dim=(0, 1, 2))  # y-grad
+    J31, J32, J33 = torch.gradient(disp[2], dim=(0, 1, 2))  # z-grad
 
-    jac_det = np.zeros(grid[0].shape)
-    for i in range(grid.shape[1]):
-        for j in range(grid.shape[2]):
-            for k in range(grid.shape[3]):
-                jac_mij = [[xFX[i, j, k], xFY[i, j, k], xFZ[i, j, k]], [yFX[i, j, k], yFY[i, j, k], yFZ[i, j, k]], [zFX[i, j, k], zFY[i, j, k], zFZ[i, j, k]]]
-                jac_det[i, j, k] =  np.linalg.det(jac_mij)
+    # Stack into a Jacobian matrix: Shape [D, H, W, 3, 3]
+    jacobian = torch.stack([
+        torch.stack([J11, J12, J13], dim=-1),
+        torch.stack([J21, J22, J23], dim=-1),
+        torch.stack([J31, J32, J33], dim=-1),
+    ], dim=-2)
+
+    # Compute determinant for each spatial location
+    jac_det = torch.det(jacobian)  # Shape: [D, H, W]
+
     return jac_det
 
 import nibabel as nib 
@@ -173,6 +176,15 @@ def save_nifti(array, file_path, affine=None):
     # Save the NIfTI image to the specified file path 
     nib.save(nifti_img, file_path) 
     print(f"Saved NIfTI file to {file_path}")
+
+def hd95(pred, target):
+    """
+    Compute the 95th percentile of the Hausdorff Distance between predicted and target masks.
+    Requires both masks to be binary.
+    """
+    from medpy.metric.binary import hd95
+    return hd95(pred.astype(bool), target.astype(bool))
+
 
 import re
 def process_label():

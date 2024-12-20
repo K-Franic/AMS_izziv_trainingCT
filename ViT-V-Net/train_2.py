@@ -118,10 +118,10 @@ class LungCTRegistrationDataset(Dataset):
 def main():
     # Initialize WandB
     wandb.init(
-        project="KF-ct-registration_test",  # Your project name on WandB
+        project="KF-ct-reg_500",  # Your project name on WandB
         config={
-            "learning_rate": 0.0001,
-            "epochs": 200,
+            "learning_rate": 0.00005,
+            "epochs": 500,
             "batch_size": 1,
             "optimizer": "Adam",
             "model": "ViT-V-Net"
@@ -141,7 +141,7 @@ def main():
     train_dir = "/app/Release_06_12_23/imagesTr"
     val_dir = "/app/Release_06_12_23/imagesTr"  # Same directory for validation
     mask_dir = "/app/Release_06_12_23/masksTr"  # Mask directory
-    save_dir = '/app/ViT-V-Net/Models/Vitvnet200'
+    save_dir = '/app/ViT-V-Net/Models/Vitvnet/Vitvnet500'
     lr = config.learning_rate
     epoch_start = 0
     max_epoch = config.epochs
@@ -171,10 +171,13 @@ def main():
     # Optimizer and Loss
     optimizer = optim.Adam(model.parameters(), lr=updated_lr, weight_decay=0, amsgrad=True)
     criterions = [nn.MSELoss(), losses.Grad3d(penalty='l2')]
-    weights = [1, 0.02]
+    weights = [1, 0.1]
 
     # Training Loop
     best_metric = 0
+
+    # Define the number of accumulation steps
+    accumulation_steps = 4  # Adjust this based on available GPU memory
 
     for epoch in range(epoch_start, max_epoch):
         print(f"Epoch {epoch + 1}/{max_epoch}")
@@ -182,26 +185,36 @@ def main():
         loss_all = AverageMeter()
 
         for idx, data in enumerate(train_loader):
-            # Training Step
+            # Adjust learning rate dynamically
             adjust_learning_rate(optimizer, epoch, max_epoch, lr)
-            data = [t.cuda() for t in data]
+
+            # Move data to device
+            data = [t.to(compute_device) for t in data]
             x, y = data[0], data[1]
 
-            # Forward Pass
+            # Forward pass
             x_in = torch.cat((x, y), dim=1)
             output = model(x_in)
+
+            # Compute loss
             loss = sum(criterions[i](output[i], y) * weights[i] for i in range(len(criterions)))
 
-            # Backward Pass
-            optimizer.zero_grad()
+            # Normalize loss by accumulation steps
+            loss = loss / accumulation_steps
+
+            # Backward pass
             loss.backward()
-            optimizer.step()
 
-            # Update Metrics
-            loss_all.update(loss.item(), y.numel())
+            # Perform optimizer step and reset gradients every `accumulation_steps` iterations
+            if (idx + 1) % accumulation_steps == 0:
+                optimizer.step()
+                optimizer.zero_grad()
 
-            # Log training metrics to WandB
-            wandb.log({"Train Loss": loss.item(), "Epoch": epoch + 1})
+            # Update metrics
+            loss_all.update(loss.item() * accumulation_steps, y.numel())  # Scale back loss to original value
+
+            # Log training metrics
+            wandb.log({"Train Loss": loss_all.avg, "Epoch": epoch + 1})
 
         print(f"Training Loss: {loss_all.avg:.4f}")
 
@@ -226,31 +239,23 @@ def main():
     # Finish WandB run
     wandb.finish()
 
+def hd95(pred, target):
+    """
+    Compute the 95th percentile of the Hausdorff Distance between predicted and target masks.
+    Requires both masks to be binary.
+    """
+    from medpy.metric.binary import hd95
+    return hd95(pred.astype(bool), target.astype(bool))
+
 # Validation Function
-"""def validate(model, reg_model, val_loader, device):
-    model.eval()
-    eval_metric = AverageMeter()
-
-    with torch.no_grad():
-        for data in val_loader:
-            data = [t.cuda() for t in data]
-            x, y, x_seg, y_seg = data
-            x_in = torch.cat((x, y), dim=1)
-            output = model(x_in)
-            def_out = reg_model([x_seg.float(), output[1]])
-            metric = utils.dice_val(def_out.long(), y_seg.long(), num_classes=46)
-            eval_metric.update(metric.item(), x.size(0))
-
-    return eval_metric.avg
-# Add additional imports if needed for new metrics
-from sklearn.metrics import mean_absolute_error
-"""
 # Updated validate function
 def validate(model, reg_model, val_loader, device):
     model.eval()
     dice_meter = AverageMeter()
     mse_meter = AverageMeter()
     mae_meter = AverageMeter()  # Example: Mean Absolute Error
+    hd95_meter = AverageMeter()
+    log_jac_det_std_meter = AverageMeter()
 
     with torch.no_grad():
         for data in val_loader:
@@ -276,17 +281,31 @@ def validate(model, reg_model, val_loader, device):
             mae = mean_absolute_error(def_out.cpu().numpy().flatten(), y.cpu().numpy().flatten())
             mae_meter.update(mae, x.size(0))
 
-    print(f"Validation Results - Dice: {dice_meter.avg:.4f}, MSE: {mse_meter.avg:.4f}, MAE: {mae_meter.avg:.4f}")
+            # Compute HD95
+            hd95 = utils.hd95(def_out.cpu().numpy(), y.cpu().numpy())  # Assuming hd95 is implemented in utils
+            hd95_meter.update(hd95, x.size(0))
+
+            # Compute Log Jacobian Determinant Std Deviation
+            jac_det_std = torch.std(utils.jacobian_determinant(output[1]))
+            log_jac_det_std = torch.log1p(jac_det_std)  # Log for stability
+            log_jac_det_std_meter.update(log_jac_det_std.item(), x.size(0))
+
+    #print(f"Validation Results - Dice: {dice_meter.avg:.4f}, MSE: {mse_meter.avg:.4f}, MAE: {mae_meter.avg:.4f}")
 
     # Log metrics to WandB
     wandb.log({
         "Validation Dice": dice_meter.avg,
         "Validation MSE": mse_meter.avg,
         "Validation MAE": mae_meter.avg,
+        "Validation HD95": hd95_meter.avg,
+        "Validation LogJacDetStd": log_jac_det_std_meter.avg,
     })
+    
 
     # Return main metric for checkpointing
     return dice_meter.avg
+
+
 
 # Checkpoint Saver
 def save_checkpoint(state, save_dir, filename):
@@ -319,5 +338,8 @@ if __name__ == '__main__':
     '''
     GPU configuration
     '''
+    start = time.time()
     torch.cuda.empty_cache()
     main()
+    end = time.time()
+    print(f"Time spent for training: {(end-start):.1f}")
